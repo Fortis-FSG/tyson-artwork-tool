@@ -36,6 +36,12 @@ export interface GeneratedConcept {
   variant: number;
 }
 
+export interface UploadedReferenceImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+}
+
 export interface GenerateImagesResponse {
   concepts: GeneratedConcept[];
 }

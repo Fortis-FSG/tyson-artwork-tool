@@ -1,10 +1,14 @@
-const XAI_IMAGES_URL = "https://api.x.ai/v1/images/generations";
+import { XAI_MAX_REFERENCE_IMAGES } from "@/lib/referenceImages";
+
+const XAI_GENERATIONS_URL = "https://api.x.ai/v1/images/generations";
+const XAI_EDITS_URL = "https://api.x.ai/v1/images/edits";
 const IMAGE_MODEL = "grok-imagine-image-quality";
 
 export interface GenerateImageOptions {
   prompt: string;
   aspectRatio?: string;
   resolution?: "1k" | "2k";
+  referenceImageUrls?: string[];
 }
 
 export interface GeneratedImageResult {
@@ -35,33 +39,7 @@ function getApiKey(): string {
   return apiKey;
 }
 
-export async function generateConceptImage(
-  options: GenerateImageOptions,
-): Promise<GeneratedImageResult> {
-  const response = await fetch(XAI_IMAGES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getApiKey()}`,
-    },
-    body: JSON.stringify({
-      model: IMAGE_MODEL,
-      prompt: options.prompt,
-      n: 1,
-      response_format: "b64_json",
-      aspect_ratio: options.aspectRatio ?? "4:3",
-      resolution: options.resolution ?? "1k",
-    }),
-  });
-
-  const data = (await response.json()) as XaiImageResponse;
-
-  if (!response.ok) {
-    throw new Error(
-      data.error?.message ?? `xAI API error: ${response.status}`,
-    );
-  }
-
+function parseImageResponse(data: XaiImageResponse): GeneratedImageResult {
   const imageData = data.data?.[0];
 
   if (!imageData?.b64_json) {
@@ -74,13 +52,84 @@ export async function generateConceptImage(
   };
 }
 
+async function callXaiImageApi(
+  url: string,
+  body: Record<string, unknown>,
+): Promise<GeneratedImageResult> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getApiKey()}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = (await response.json()) as XaiImageResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      data.error?.message ?? `xAI API error: ${response.status}`,
+    );
+  }
+
+  return parseImageResponse(data);
+}
+
+export async function generateConceptImage(
+  options: GenerateImageOptions,
+): Promise<GeneratedImageResult> {
+  const referenceUrls = (options.referenceImageUrls ?? []).slice(
+    0,
+    XAI_MAX_REFERENCE_IMAGES,
+  );
+
+  const basePayload = {
+    model: IMAGE_MODEL,
+    prompt: options.prompt,
+    n: 1,
+    response_format: "b64_json",
+    aspect_ratio: options.aspectRatio ?? "4:3",
+    resolution: options.resolution ?? "1k",
+  };
+
+  if (referenceUrls.length === 0) {
+    return callXaiImageApi(XAI_GENERATIONS_URL, basePayload);
+  }
+
+  if (referenceUrls.length === 1) {
+    return callXaiImageApi(XAI_EDITS_URL, {
+      ...basePayload,
+      image: {
+        url: referenceUrls[0],
+        type: "image_url",
+      },
+    });
+  }
+
+  return callXaiImageApi(XAI_EDITS_URL, {
+    ...basePayload,
+    images: referenceUrls.map((url) => ({
+      url,
+      type: "image_url",
+    })),
+  });
+}
+
 export async function generateConceptImagesParallel(
   prompts: { variant: number; prompt: string }[],
   aspectRatio: string,
+  referenceImageUrls: string[] = [],
 ): Promise<Array<{ variant: number; dataUrl: string; prompt: string }>> {
+  const refs = referenceImageUrls.slice(0, XAI_MAX_REFERENCE_IMAGES);
+
   const results = await Promise.allSettled(
     prompts.map(async ({ variant, prompt }) => {
-      const result = await generateConceptImage({ prompt, aspectRatio });
+      const result = await generateConceptImage({
+        prompt,
+        aspectRatio,
+        referenceImageUrls: refs,
+      });
       return { variant, dataUrl: result.dataUrl, prompt };
     }),
   );

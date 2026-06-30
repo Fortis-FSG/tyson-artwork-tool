@@ -3,6 +3,7 @@ import {
   buildColorSpecificPromptBlock,
   extractColorsFromEmail,
 } from "@/lib/extractColors";
+import { XAI_MAX_REFERENCE_IMAGES } from "@/lib/referenceImages";
 import type { ParsedEmailContext } from "@/types";
 
 const SYSTEM_PROMPT = `You are a senior prepress designer creating professional Tyson/Walmart private-label packaging concepts.
@@ -89,15 +90,55 @@ function buildSpecsBlock(context: ParsedEmailContext): string {
   return lines.join("\n");
 }
 
+function buildReferenceImagesPromptBlock(
+  referenceImages: { name: string }[],
+): string {
+  if (referenceImages.length === 0) {
+    return "Follow typical Tyson/Walmart private-label label conventions.";
+  }
+
+  const apiImages = referenceImages.slice(0, XAI_MAX_REFERENCE_IMAGES);
+  const lines: string[] = [
+    "REFERENCE IMAGES PROVIDED (use as visual guide):",
+    ...apiImages.map(
+      (img, index) =>
+        `- <IMAGE_${index}>: "${img.name}" — analyze for layout, typography, PMS colors, logos, and brand elements`,
+    ),
+    "",
+    "Apply reference guidance:",
+    "- <IMAGE_0>: Primary reference — often the email screenshot or main artwork file",
+  ];
+
+  if (apiImages.length > 1) {
+    lines.push(
+      "- <IMAGE_1> and beyond: Additional artwork, logo, or prior-version references — match style, color values, and hierarchy",
+    );
+  }
+
+  lines.push(
+    "- Preserve PMS spot colors and design hierarchy from references where applicable",
+    "- Create a professional label concept inspired by references, not a pixel-perfect copy",
+  );
+
+  if (referenceImages.length > XAI_MAX_REFERENCE_IMAGES) {
+    lines.push(
+      `- Note: ${referenceImages.length - XAI_MAX_REFERENCE_IMAGES} additional image(s) uploaded; prioritize <IMAGE_0> through <IMAGE_${XAI_MAX_REFERENCE_IMAGES - 1}>`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function buildUserPrompt(
   context: ParsedEmailContext,
   emailText: string,
   variantDirection: string,
-  hasScreenshot: boolean,
+  referenceImages: { name: string }[],
 ): string {
   const emailExcerpt = emailText.trim().slice(0, 2000);
   const extractedColors = extractColorsFromEmail(emailText);
   const colorPromptBlock = buildColorSpecificPromptBlock(extractedColors);
+  const referencePromptBlock = buildReferenceImagesPromptBlock(referenceImages);
 
   return `${SYSTEM_PROMPT}
 
@@ -115,7 +156,7 @@ SOURCE EMAIL (extract all relevant details):
 ${emailExcerpt}
 """
 
-${hasScreenshot ? "A reference email screenshot was provided — mimic the referenced artwork style, typography feel, and color values from the attached reference file mentioned in the email." : "Follow typical Tyson/Walmart private-label label conventions."}
+${referencePromptBlock}
 
 REQUIREMENTS:
 - Photorealistic flat label artwork mockup on neutral background
@@ -128,13 +169,13 @@ REQUIREMENTS:
 
 export function buildConceptPrompts(
   emailText: string,
-  hasScreenshot: boolean,
+  referenceImages: { name: string }[] = [],
 ): { variant: number; prompt: string }[] {
   const context = parseEmailText(emailText);
 
   return VARIANT_DIRECTIONS.map(({ variant, direction }) => ({
     variant,
-    prompt: buildUserPrompt(context, emailText, direction, hasScreenshot),
+    prompt: buildUserPrompt(context, emailText, direction, referenceImages),
   }));
 }
 

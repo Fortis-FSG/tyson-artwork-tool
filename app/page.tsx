@@ -12,6 +12,7 @@ import type {
   ArtworkRequest,
   GeneratedConcept,
   GenerateImagesResponse,
+  UploadedReferenceImage,
 } from "@/types";
 
 const STEPS: { key: AppStep; label: string }[] = [
@@ -33,7 +34,7 @@ function getStepIndex(step: AppStep): number {
 export default function HomePage() {
   const [step, setStep] = useState<AppStep>("input");
   const [emailText, setEmailText] = useState("");
-  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [referenceImages, setReferenceImages] = useState<UploadedReferenceImage[]>([]);
   const [concepts, setConcepts] = useState<GeneratedConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<GeneratedConcept | null>(null);
   const [artworkRequest, setArtworkRequest] = useState<ArtworkRequest | null>(null);
@@ -53,7 +54,7 @@ export default function HomePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           emailText,
-          hasScreenshot: Boolean(screenshotPreview),
+          referenceImages,
         }),
       });
 
@@ -74,7 +75,7 @@ export default function HomePage() {
       setIsGenerating(false);
       setIsRegenerating(false);
     }
-  }, [emailText, screenshotPreview]);
+  }, [emailText, referenceImages]);
 
   const handleRegenerate = useCallback(async () => {
     setIsRegenerating(true);
@@ -86,6 +87,8 @@ export default function HomePage() {
       setSelectedConcept(concept);
       setError(null);
 
+      const referenceImageNames = referenceImages.map((image) => image.name);
+
       try {
         const response = await fetch("/api/generate-output", {
           method: "POST",
@@ -93,6 +96,7 @@ export default function HomePage() {
           body: JSON.stringify({
             emailText,
             selectedConcept: concept,
+            referenceImageNames,
           }),
         });
 
@@ -105,20 +109,20 @@ export default function HomePage() {
         setArtworkRequest(data.artworkRequest);
         setDesignBrief(data.designBrief);
       } catch {
-        const fallback = generateOutput(emailText, concept);
+        const fallback = generateOutput(emailText, concept, referenceImageNames);
         setArtworkRequest(fallback.artworkRequest);
         setDesignBrief(fallback.designBrief);
       }
 
       setStep("output");
     },
-    [emailText],
+    [emailText, referenceImages],
   );
 
   const handleStartOver = useCallback(() => {
     setStep("input");
     setEmailText("");
-    setScreenshotPreview(null);
+    setReferenceImages([]);
     setConcepts([]);
     setSelectedConcept(null);
     setArtworkRequest(null);
@@ -154,10 +158,10 @@ export default function HomePage() {
       {step === "input" && (
         <EmailInput
           emailText={emailText}
-          screenshotPreview={screenshotPreview}
+          referenceImages={referenceImages}
           isGenerating={isGenerating}
           onEmailTextChange={setEmailText}
-          onScreenshotChange={(_, preview) => setScreenshotPreview(preview)}
+          onReferenceImagesChange={setReferenceImages}
           onGenerate={generateImages}
         />
       )}

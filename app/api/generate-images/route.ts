@@ -5,14 +5,46 @@ import {
   getAspectRatioForSize,
   getParsedContext,
 } from "@/lib/generatePrompt";
+import {
+  MAX_REFERENCE_IMAGES,
+  MAX_REFERENCE_IMAGE_BYTES,
+  XAI_MAX_REFERENCE_IMAGES,
+} from "@/lib/referenceImages";
 import { generateConceptImagesParallel } from "@/lib/xaiImage";
-import type { GenerateImagesResponse } from "@/types";
+import type { GenerateImagesResponse, UploadedReferenceImage } from "@/types";
 
 export const maxDuration = 120;
 
 interface GenerateImagesBody {
   emailText: string;
-  hasScreenshot?: boolean;
+  referenceImages?: UploadedReferenceImage[];
+}
+
+function validateReferenceImages(
+  images: UploadedReferenceImage[] | undefined,
+): UploadedReferenceImage[] {
+  if (!images?.length) {
+    return [];
+  }
+
+  if (images.length > MAX_REFERENCE_IMAGES) {
+    throw new Error(`Maximum of ${MAX_REFERENCE_IMAGES} reference images allowed.`);
+  }
+
+  for (const image of images) {
+    if (!image.dataUrl?.startsWith("data:image/")) {
+      throw new Error(`Invalid image data for "${image.name}".`);
+    }
+
+    const base64 = image.dataUrl.split(",")[1] ?? "";
+    const approximateBytes = Math.ceil((base64.length * 3) / 4);
+
+    if (approximateBytes > MAX_REFERENCE_IMAGE_BYTES) {
+      throw new Error(`"${image.name}" exceeds the 2MB size limit.`);
+    }
+  }
+
+  return images;
 }
 
 export async function POST(request: NextRequest) {
@@ -27,12 +59,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hasScreenshot = Boolean(body.hasScreenshot);
-    const prompts = buildConceptPrompts(emailText, hasScreenshot);
+    const referenceImages = validateReferenceImages(body.referenceImages);
+    const prompts = buildConceptPrompts(
+      emailText,
+      referenceImages.map(({ name }) => ({ name })),
+    );
     const context = getParsedContext(emailText);
     const aspectRatio = getAspectRatioForSize(context.size);
 
-    const results = await generateConceptImagesParallel(prompts, aspectRatio);
+    const referenceImageUrls = referenceImages
+      .slice(0, XAI_MAX_REFERENCE_IMAGES)
+      .map((image) => image.dataUrl);
+
+    const results = await generateConceptImagesParallel(
+      prompts,
+      aspectRatio,
+      referenceImageUrls,
+    );
 
     const response: GenerateImagesResponse = {
       concepts: results.map((result) => ({

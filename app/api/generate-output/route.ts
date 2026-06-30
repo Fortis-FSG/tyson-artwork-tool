@@ -6,6 +6,7 @@ import type { GeneratedConcept } from "@/types";
 interface GenerateOutputBody {
   emailText: string;
   selectedConcept: GeneratedConcept;
+  referenceImageNames?: string[];
 }
 
 export async function POST(request: NextRequest) {
@@ -20,7 +21,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Selected concept is required." }, { status: 400 });
     }
 
-    const output = generateOutput(body.emailText, body.selectedConcept);
+    const output = generateOutput(
+      body.emailText,
+      body.selectedConcept,
+      body.referenceImageNames ?? [],
+    );
 
     return NextResponse.json(output);
   } catch (error) {
