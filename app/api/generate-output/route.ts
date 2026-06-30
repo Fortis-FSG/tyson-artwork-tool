@@ -7,6 +7,7 @@ interface GenerateOutputBody {
   emailText: string;
   selectedConcept: GeneratedConcept;
   referenceImageNames?: string[];
+  attachmentContext?: string;
 }
 
 export async function POST(request: NextRequest) {
@@ -25,6 +26,7 @@ export async function POST(request: NextRequest) {
       body.emailText,
       body.selectedConcept,
       body.referenceImageNames ?? [],
+      body.attachmentContext ?? "",
     );
 
     return NextResponse.json(output);

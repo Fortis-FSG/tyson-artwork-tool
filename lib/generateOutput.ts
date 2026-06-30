@@ -14,6 +14,7 @@ export function buildArtworkRequest(
   emailText: string,
   selectedConcept: GeneratedConcept,
   referenceImageNames: string[] = [],
+  attachmentContext: string = "",
 ): ArtworkRequest {
   const parsed = getParsedContext(emailText);
 
@@ -42,6 +43,11 @@ export function buildArtworkRequest(
       ...parsed.colorInstructions,
       ...(referenceImageNames.length > 0
         ? [`Reference images uploaded: ${referenceImageNames.join(", ")}`]
+        : []),
+      ...(attachmentContext.trim()
+        ? [
+            `Zip/attachment context: ${attachmentContext.trim().slice(0, 500)}${attachmentContext.trim().length > 500 ? "…" : ""}`,
+          ]
         : []),
       `Selected concept variant: ${selectedConcept.variant}`,
       `Concept prompt summary: ${selectedConcept.prompt.slice(0, 200)}...`,
@@ -105,11 +111,13 @@ export function generateOutput(
   emailText: string,
   selectedConcept: GeneratedConcept,
   referenceImageNames: string[] = [],
+  attachmentContext: string = "",
 ): { artworkRequest: ArtworkRequest; designBrief: string } {
   const artworkRequest = buildArtworkRequest(
     emailText,
     selectedConcept,
     referenceImageNames,
+    attachmentContext,
   );
   const designBrief = buildDesignBrief(artworkRequest, selectedConcept);
 

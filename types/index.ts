@@ -40,6 +40,8 @@ export interface UploadedReferenceImage {
   id: string;
   name: string;
   dataUrl: string;
+  source?: "upload" | "zip";
+  sourceArchive?: string;
 }
 
 export interface GenerateImagesResponse {

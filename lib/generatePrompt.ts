@@ -129,16 +129,33 @@ function buildReferenceImagesPromptBlock(
   return lines.join("\n");
 }
 
+function buildAttachmentContextPromptBlock(attachmentContext: string): string {
+  if (!attachmentContext.trim()) {
+    return "";
+  }
+
+  const excerpt = attachmentContext.trim().slice(0, 4000);
+
+  return `ATTACHMENT / ZIP FILE CONTEXT (extracted from uploaded reference files):
+"""
+${excerpt}
+"""
+
+Use this attachment context for additional specs, color notes, copy, filenames, and layout cues referenced in the email attachments.`;
+}
+
 function buildUserPrompt(
   context: ParsedEmailContext,
   emailText: string,
   variantDirection: string,
   referenceImages: { name: string }[],
+  attachmentContext: string,
 ): string {
   const emailExcerpt = emailText.trim().slice(0, 2000);
   const extractedColors = extractColorsFromEmail(emailText);
   const colorPromptBlock = buildColorSpecificPromptBlock(extractedColors);
   const referencePromptBlock = buildReferenceImagesPromptBlock(referenceImages);
+  const attachmentPromptBlock = buildAttachmentContextPromptBlock(attachmentContext);
 
   return `${SYSTEM_PROMPT}
 
@@ -155,7 +172,7 @@ SOURCE EMAIL (extract all relevant details):
 """
 ${emailExcerpt}
 """
-
+${attachmentPromptBlock ? `\n${attachmentPromptBlock}\n` : ""}
 ${referencePromptBlock}
 
 REQUIREMENTS:
@@ -170,12 +187,19 @@ REQUIREMENTS:
 export function buildConceptPrompts(
   emailText: string,
   referenceImages: { name: string }[] = [],
+  attachmentContext: string = "",
 ): { variant: number; prompt: string }[] {
   const context = parseEmailText(emailText);
 
   return VARIANT_DIRECTIONS.map(({ variant, direction }) => ({
     variant,
-    prompt: buildUserPrompt(context, emailText, direction, referenceImages),
+    prompt: buildUserPrompt(
+      context,
+      emailText,
+      direction,
+      referenceImages,
+      attachmentContext,
+    ),
   }));
 }
 

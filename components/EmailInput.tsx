@@ -2,9 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import Image from "next/image";
-import { ImagePlus, Mail, X } from "lucide-react";
+import { Archive, ImagePlus, Mail, X } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,8 +17,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  filesToReferenceImages,
+  MAX_IMAGE_UPLOAD_BYTES,
   MAX_REFERENCE_IMAGES,
+  MAX_ZIP_UPLOAD_BYTES,
+  processUploadFiles,
   XAI_MAX_REFERENCE_IMAGES,
 } from "@/lib/referenceImages";
 import type { UploadedReferenceImage } from "@/types";
@@ -25,9 +28,11 @@ import type { UploadedReferenceImage } from "@/types";
 interface EmailInputProps {
   emailText: string;
   referenceImages: UploadedReferenceImage[];
+  attachmentContext: string;
   isGenerating: boolean;
   onEmailTextChange: (value: string) => void;
   onReferenceImagesChange: (images: UploadedReferenceImage[]) => void;
+  onAttachmentContextChange: (context: string) => void;
   onGenerate: () => void;
 }
 
@@ -60,17 +65,25 @@ Thanks,
 Sarah Mitchell
 Tyson Foods Packaging`;
 
+function formatMb(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))}MB`;
+}
+
 export function EmailInput({
   emailText,
   referenceImages,
+  attachmentContext,
   isGenerating,
   onEmailTextChange,
   onReferenceImagesChange,
+  onAttachmentContextChange,
   onGenerate,
 }: EmailInputProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploadErrors, setUploadErrors] = useState<string[]>([]);
+  const [uploadNotices, setUploadNotices] = useState<string[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -79,18 +92,37 @@ export function EmailInput({
         return;
       }
 
-      const { images, errors } = await filesToReferenceImages(
-        fileArray,
-        referenceImages.length,
-      );
+      setIsProcessing(true);
+      setUploadErrors([]);
+      setUploadNotices([]);
 
-      if (images.length > 0) {
-        onReferenceImagesChange([...referenceImages, ...images]);
+      try {
+        const result = await processUploadFiles(
+          fileArray,
+          referenceImages,
+          attachmentContext,
+        );
+
+        if (result.images.length > 0) {
+          onReferenceImagesChange([...referenceImages, ...result.images]);
+        }
+
+        if (result.attachmentContext !== attachmentContext) {
+          onAttachmentContextChange(result.attachmentContext);
+        }
+
+        setUploadErrors(result.errors);
+        setUploadNotices(result.notices);
+      } finally {
+        setIsProcessing(false);
       }
-
-      setUploadErrors(errors);
     },
-    [onReferenceImagesChange, referenceImages],
+    [
+      attachmentContext,
+      onAttachmentContextChange,
+      onReferenceImagesChange,
+      referenceImages,
+    ],
   );
 
   const removeImage = useCallback(
@@ -101,13 +133,15 @@ export function EmailInput({
     [onReferenceImagesChange, referenceImages],
   );
 
-  const clearAllImages = useCallback(() => {
+  const clearAllAttachments = useCallback(() => {
     onReferenceImagesChange([]);
+    onAttachmentContextChange("");
     setUploadErrors([]);
+    setUploadNotices([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  }, [onReferenceImagesChange]);
+  }, [onAttachmentContextChange, onReferenceImagesChange]);
 
   const handleDrop = useCallback(
     (event: React.DragEvent<HTMLDivElement>) => {
@@ -119,14 +153,15 @@ export function EmailInput({
   );
 
   const canAddMore = referenceImages.length < MAX_REFERENCE_IMAGES;
-  const canGenerate = emailText.trim().length > 20 && !isGenerating;
+  const canGenerate = emailText.trim().length > 20 && !isGenerating && !isProcessing;
+  const hasAttachments = referenceImages.length > 0 || attachmentContext.length > 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="space-y-2 text-center">
         <h2 className="text-2xl font-semibold tracking-tight">New Artwork Request</h2>
         <p className="text-muted-foreground">
-          Upload reference images and paste the full email text to generate label concepts.
+          Upload reference files and paste the full email text to generate label concepts.
         </p>
       </div>
 
@@ -136,21 +171,22 @@ export function EmailInput({
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <ImagePlus className="h-4 w-4" />
-                Reference Images
+                Reference Files
               </CardTitle>
               <CardDescription>
-                Upload email screenshots, label artwork, or AI file previews. Up to{" "}
-                {MAX_REFERENCE_IMAGES} images ({XAI_MAX_REFERENCE_IMAGES} used for AI
-                generation).
+                Images or .zip archives (email screenshots, artwork, spec sheets). Up to{" "}
+                {MAX_REFERENCE_IMAGES} images ({XAI_MAX_REFERENCE_IMAGES} sent to AI). Images
+                up to {formatMb(MAX_IMAGE_UPLOAD_BYTES)}, zip up to{" "}
+                {formatMb(MAX_ZIP_UPLOAD_BYTES)}.
               </CardDescription>
             </div>
-            {referenceImages.length > 0 && (
+            {hasAttachments && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="shrink-0 text-xs"
-                onClick={clearAllImages}
+                onClick={clearAllAttachments}
               >
                 Clear all
               </Button>
@@ -178,11 +214,19 @@ export function EmailInput({
                     <p className="truncate text-xs font-medium" title={image.name}>
                       {image.name}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {index < XAI_MAX_REFERENCE_IMAGES
-                        ? `AI ref IMAGE_${index}`
-                        : "Stored for context"}
-                    </p>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                      {image.source === "zip" && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                          <Archive className="mr-0.5 h-2.5 w-2.5" />
+                          ZIP
+                        </Badge>
+                      )}
+                      <p className="text-[10px] text-muted-foreground">
+                        {index < XAI_MAX_REFERENCE_IMAGES
+                          ? `AI ref IMAGE_${index}`
+                          : "Context only"}
+                      </p>
+                    </div>
                   </div>
                   <Button
                     type="button"
@@ -198,13 +242,23 @@ export function EmailInput({
             </div>
           )}
 
+          {attachmentContext && (
+            <div className="rounded-lg border bg-muted/40 p-3">
+              <p className="mb-1 text-xs font-medium">Extracted zip context</p>
+              <p className="line-clamp-3 text-xs text-muted-foreground">
+                {attachmentContext.slice(0, 300)}
+                {attachmentContext.length > 300 ? "…" : ""}
+              </p>
+            </div>
+          )}
+
           {canAddMore && (
             <div
               className={`relative flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-colors ${
                 dragActive
                   ? "border-primary bg-primary/5"
                   : "border-muted-foreground/25 hover:border-primary/50"
-              }`}
+              } ${isProcessing ? "pointer-events-none opacity-60" : ""}`}
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragActive(true);
@@ -223,7 +277,7 @@ export function EmailInput({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.zip,application/zip,application/x-zip-compressed"
                 multiple
                 className="hidden"
                 onChange={(e) => {
@@ -236,12 +290,15 @@ export function EmailInput({
 
               <ImagePlus className="mb-2 h-7 w-7 text-muted-foreground" />
               <p className="text-sm font-medium">
-                {referenceImages.length === 0
-                  ? "Drop images here or click to upload"
-                  : "Add more reference images"}
+                {isProcessing
+                  ? "Processing files…"
+                  : referenceImages.length === 0
+                    ? "Drop files here or click to upload"
+                    : "Add more reference files"}
               </p>
-              <p className="text-xs text-muted-foreground">
-                PNG, JPG, WebP — up to 2MB each
+              <p className="text-center text-xs text-muted-foreground">
+                PNG, JPG, WebP ({formatMb(MAX_IMAGE_UPLOAD_BYTES)} max) · .zip (
+                {formatMb(MAX_ZIP_UPLOAD_BYTES)} max)
               </p>
             </div>
           )}
@@ -250,6 +307,18 @@ export function EmailInput({
             <p className="text-center text-xs text-muted-foreground">
               Maximum of {MAX_REFERENCE_IMAGES} reference images reached.
             </p>
+          )}
+
+          {uploadNotices.length > 0 && (
+            <Alert>
+              <AlertDescription>
+                <ul className="list-inside list-disc space-y-1">
+                  {uploadNotices.map((notice) => (
+                    <li key={notice}>{notice}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
           )}
 
           {uploadErrors.length > 0 && (
@@ -315,7 +384,11 @@ export function EmailInput({
         disabled={!canGenerate}
         onClick={onGenerate}
       >
-        {isGenerating ? "Generating Concepts..." : "Generate Concept Images"}
+        {isGenerating
+          ? "Generating Concepts..."
+          : isProcessing
+            ? "Processing Uploads..."
+            : "Generate Concept Images"}
       </Button>
     </div>
   );

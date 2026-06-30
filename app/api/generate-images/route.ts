@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { estimateDataUrlBytes } from "@/lib/compressImage";
 import {
   buildConceptPrompts,
   getAspectRatioForSize,
   getParsedContext,
 } from "@/lib/generatePrompt";
 import {
+  MAX_API_IMAGE_BYTES,
   MAX_REFERENCE_IMAGES,
-  MAX_REFERENCE_IMAGE_BYTES,
   XAI_MAX_REFERENCE_IMAGES,
 } from "@/lib/referenceImages";
 import { generateConceptImagesParallel } from "@/lib/xaiImage";
@@ -18,6 +19,7 @@ export const maxDuration = 120;
 interface GenerateImagesBody {
   emailText: string;
   referenceImages?: UploadedReferenceImage[];
+  attachmentContext?: string;
 }
 
 function validateReferenceImages(
@@ -36,11 +38,12 @@ function validateReferenceImages(
       throw new Error(`Invalid image data for "${image.name}".`);
     }
 
-    const base64 = image.dataUrl.split(",")[1] ?? "";
-    const approximateBytes = Math.ceil((base64.length * 3) / 4);
+    const approximateBytes = estimateDataUrlBytes(image.dataUrl);
 
-    if (approximateBytes > MAX_REFERENCE_IMAGE_BYTES) {
-      throw new Error(`"${image.name}" exceeds the 2MB size limit.`);
+    if (approximateBytes > MAX_API_IMAGE_BYTES) {
+      throw new Error(
+        `"${image.name}" is too large after processing. Try a smaller source file.`,
+      );
     }
   }
 
@@ -60,9 +63,12 @@ export async function POST(request: NextRequest) {
     }
 
     const referenceImages = validateReferenceImages(body.referenceImages);
+    const attachmentContext = body.attachmentContext?.trim() ?? "";
+
     const prompts = buildConceptPrompts(
       emailText,
       referenceImages.map(({ name }) => ({ name })),
+      attachmentContext,
     );
     const context = getParsedContext(emailText);
     const aspectRatio = getAspectRatioForSize(context.size);

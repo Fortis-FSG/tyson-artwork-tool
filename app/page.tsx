@@ -35,6 +35,7 @@ export default function HomePage() {
   const [step, setStep] = useState<AppStep>("input");
   const [emailText, setEmailText] = useState("");
   const [referenceImages, setReferenceImages] = useState<UploadedReferenceImage[]>([]);
+  const [attachmentContext, setAttachmentContext] = useState("");
   const [concepts, setConcepts] = useState<GeneratedConcept[]>([]);
   const [selectedConcept, setSelectedConcept] = useState<GeneratedConcept | null>(null);
   const [artworkRequest, setArtworkRequest] = useState<ArtworkRequest | null>(null);
@@ -55,6 +56,7 @@ export default function HomePage() {
         body: JSON.stringify({
           emailText,
           referenceImages,
+          attachmentContext,
         }),
       });
 
@@ -75,7 +77,7 @@ export default function HomePage() {
       setIsGenerating(false);
       setIsRegenerating(false);
     }
-  }, [emailText, referenceImages]);
+  }, [emailText, referenceImages, attachmentContext]);
 
   const handleRegenerate = useCallback(async () => {
     setIsRegenerating(true);
@@ -97,6 +99,7 @@ export default function HomePage() {
             emailText,
             selectedConcept: concept,
             referenceImageNames,
+            attachmentContext,
           }),
         });
 
@@ -109,20 +112,26 @@ export default function HomePage() {
         setArtworkRequest(data.artworkRequest);
         setDesignBrief(data.designBrief);
       } catch {
-        const fallback = generateOutput(emailText, concept, referenceImageNames);
+        const fallback = generateOutput(
+          emailText,
+          concept,
+          referenceImageNames,
+          attachmentContext,
+        );
         setArtworkRequest(fallback.artworkRequest);
         setDesignBrief(fallback.designBrief);
       }
 
       setStep("output");
     },
-    [emailText, referenceImages],
+    [emailText, referenceImages, attachmentContext],
   );
 
   const handleStartOver = useCallback(() => {
     setStep("input");
     setEmailText("");
     setReferenceImages([]);
+    setAttachmentContext("");
     setConcepts([]);
     setSelectedConcept(null);
     setArtworkRequest(null);
@@ -159,9 +168,11 @@ export default function HomePage() {
         <EmailInput
           emailText={emailText}
           referenceImages={referenceImages}
+          attachmentContext={attachmentContext}
           isGenerating={isGenerating}
           onEmailTextChange={setEmailText}
           onReferenceImagesChange={setReferenceImages}
+          onAttachmentContextChange={setAttachmentContext}
           onGenerate={generateImages}
         />
       )}
