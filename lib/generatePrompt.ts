@@ -1,4 +1,8 @@
 import { parseEmailText } from "@/lib/parseEmail";
+import {
+  buildColorSpecificPromptBlock,
+  extractColorsFromEmail,
+} from "@/lib/extractColors";
 import type { ParsedEmailContext } from "@/types";
 
 const SYSTEM_PROMPT = `You are a senior prepress designer creating professional Tyson/Walmart private-label packaging concepts.
@@ -50,7 +54,20 @@ function buildSpecsBlock(context: ParsedEmailContext): string {
 
   if (context.spotColors.length > 0) {
     lines.push(`- Spot colors (PMS): ${context.spotColors.join(", ")}`);
-  } else {
+  }
+
+  if (context.colorAssignments.length > 0) {
+    lines.push("- Color assignments:");
+    context.colorAssignments.forEach(({ role, pms }) => {
+      lines.push(`  • ${role}: ${pms}`);
+    });
+  }
+
+  if (context.standardInks.length > 0) {
+    lines.push(`- Standard inks: ${context.standardInks.join(", ")}`);
+  }
+
+  if (context.spotColors.length === 0 && context.standardInks.length === 0) {
     lines.push("- Spot colors: Tyson brand reds/yellows + black + white (match reference if provided)");
   }
 
@@ -79,12 +96,16 @@ function buildUserPrompt(
   hasScreenshot: boolean,
 ): string {
   const emailExcerpt = emailText.trim().slice(0, 2000);
+  const extractedColors = extractColorsFromEmail(emailText);
+  const colorPromptBlock = buildColorSpecificPromptBlock(extractedColors);
 
   return `${SYSTEM_PROMPT}
 
 Create a single professional packaging LABEL CONCEPT mockup (flat front-facing label design, not a product photo on a shelf).
 
 ${buildSpecsBlock(context)}
+
+${colorPromptBlock}
 
 DESIGN DIRECTION FOR THIS CONCEPT:
 ${variantDirection}
@@ -94,7 +115,7 @@ SOURCE EMAIL (extract all relevant details):
 ${emailExcerpt}
 """
 
-${hasScreenshot ? "A reference email screenshot was provided — mimic the referenced artwork style, typography feel, and layout cues from the attached reference file mentioned in the email." : "Follow typical Tyson/Walmart private-label label conventions."}
+${hasScreenshot ? "A reference email screenshot was provided — mimic the referenced artwork style, typography feel, and color values from the attached reference file mentioned in the email." : "Follow typical Tyson/Walmart private-label label conventions."}
 
 REQUIREMENTS:
 - Photorealistic flat label artwork mockup on neutral background
@@ -102,7 +123,7 @@ REQUIREMENTS:
 - Professional print design quality suitable for prepress review
 - Include placeholder regulatory text areas where appropriate
 - No watermarks, no cartoon style, no 3D product renders
-- Show clear color separation appearance for spot colors`;
+- Each specified Pantone spot color must appear as a distinct solid ink with accurate hue`;
 }
 
 export function buildConceptPrompts(

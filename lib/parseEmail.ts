@@ -1,7 +1,8 @@
 import type { ParsedEmailContext, Urgency } from "@/types";
-
-const PMS_COLOR_PATTERN =
-  /PMS\s*(\d{1,4}(?:\s*[A-Z])?(?:\s*C)?)|Pantone\s*(\d{1,4})/gi;
+import {
+  buildColorNotesSummary,
+  extractColorsFromEmail,
+} from "@/lib/extractColors";
 
 const SIZE_PATTERN =
   /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:"|''|in|inch|inches)?/gi;
@@ -62,21 +63,6 @@ function extractSizes(text: string): string[] {
   return [...new Set(sizes)];
 }
 
-function extractPmsColors(text: string): string[] {
-  const colors: string[] = [];
-  const regex = new RegExp(PMS_COLOR_PATTERN.source, "gi");
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    const code = match[1] ?? match[2];
-    if (code) {
-      colors.push(`PMS ${code.trim()}`);
-    }
-  }
-
-  return [...new Set(colors)];
-}
-
 function extractCustomer(text: string): string | null {
   for (const pattern of CUSTOMER_PATTERNS) {
     const match = text.match(pattern);
@@ -133,6 +119,9 @@ function extractNotes(text: string): string[] {
     "must",
     "ai file",
     ".ai",
+    "color",
+    "pms",
+    "pantone",
   ];
 
   for (const line of lines) {
@@ -147,7 +136,7 @@ function extractNotes(text: string): string[] {
 export function parseEmailText(emailText: string): ParsedEmailContext {
   const normalized = emailText.trim();
   const sizes = extractSizes(normalized);
-  const spotColors = extractPmsColors(normalized);
+  const extractedColors = extractColorsFromEmail(normalized);
 
   return {
     customer: extractCustomer(normalized),
@@ -159,10 +148,11 @@ export function parseEmailText(emailText: string): ParsedEmailContext {
     material: firstMatch(normalized, MATERIAL_PATTERN),
     unwind: firstMatch(normalized, UNWIND_PATTERN),
     rollQty: firstMatch(normalized, ROLL_QTY_PATTERN),
-    spotColors,
-    colorNotes: spotColors.length
-      ? `Spot colors identified: ${spotColors.join(", ")}`
-      : null,
+    spotColors: extractedColors.spotColors,
+    colorAssignments: extractedColors.colorAssignments,
+    colorInstructions: extractedColors.colorInstructions,
+    standardInks: extractedColors.standardInks,
+    colorNotes: buildColorNotesSummary(extractedColors),
     barcodeRequirements: normalized.match(BARCODE_PATTERN)?.[0]?.trim() ?? null,
     layoutInstructions: normalized.match(LAYOUT_PATTERN)?.[0]?.trim() ?? null,
     notes: extractNotes(normalized),

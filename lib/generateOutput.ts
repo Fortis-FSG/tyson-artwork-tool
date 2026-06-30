@@ -38,6 +38,7 @@ export function buildArtworkRequest(
     layout_instructions: parsed.layoutInstructions,
     parsed_notes: [
       ...parsed.notes,
+      ...parsed.colorInstructions,
       `Selected concept variant: ${selectedConcept.variant}`,
       `Concept prompt summary: ${selectedConcept.prompt.slice(0, 200)}...`,
     ],

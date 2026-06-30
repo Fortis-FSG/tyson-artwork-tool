@@ -45,6 +45,11 @@ export interface GenerateOutputResponse {
   designBrief: string;
 }
 
+export interface ColorAssignment {
+  role: string;
+  pms: string;
+}
+
 export interface ParsedEmailContext {
   customer: string | null;
   urgency: Urgency;
@@ -56,6 +61,9 @@ export interface ParsedEmailContext {
   unwind: string | null;
   rollQty: string | null;
   spotColors: string[];
+  colorAssignments: ColorAssignment[];
+  colorInstructions: string[];
+  standardInks: string[];
   colorNotes: string | null;
   barcodeRequirements: string | null;
   layoutInstructions: string | null;
