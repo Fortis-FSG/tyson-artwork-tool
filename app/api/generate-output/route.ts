@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { generateOutput } from "@/lib/generateOutput";
+import { requireTeamAccess } from "@/lib/teamAuth";
 import type { GeneratedConcept } from "@/types";
 
 interface GenerateOutputBody {
@@ -11,6 +12,11 @@ interface GenerateOutputBody {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = requireTeamAccess(request);
+  if (denied) {
+    return denied;
+  }
+
   try {
     const body = (await request.json()) as GenerateOutputBody;
 

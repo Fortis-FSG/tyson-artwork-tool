@@ -2,6 +2,12 @@ export type AppStep = "input" | "generating" | "review" | "output";
 
 export type Urgency = "standard" | "rush" | "urgent";
 
+export type RequestStatus =
+  | "draft"
+  | "awaiting_customer"
+  | "customer_approved"
+  | "handed_off";
+
 export interface LabelSpecifications {
   size: string | null;
   material: string | null;
@@ -31,9 +37,59 @@ export interface ArtworkRequest {
 
 export interface GeneratedConcept {
   id: string;
+  /** Data URL or remote Blob URL used for display/download */
   imageDataUrl: string;
   prompt: string;
   variant: number;
+}
+
+export interface SavedRequest {
+  id: string;
+  status: RequestStatus;
+  step: AppStep;
+  emailText: string;
+  attachmentContext: string;
+  product: string | null;
+  customer: string | null;
+  referenceNumber: string | null;
+  urgency: Urgency;
+  concepts: GeneratedConcept[];
+  referenceImages: UploadedReferenceImage[];
+  selectedConceptId: string | null;
+  customerApprovedConceptId: string | null;
+  customerComment: string | null;
+  artworkRequest: ArtworkRequest | null;
+  designBrief: string;
+  shareToken: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedRequestSummary {
+  id: string;
+  status: RequestStatus;
+  step: AppStep;
+  product: string | null;
+  customer: string | null;
+  referenceNumber: string | null;
+  urgency: Urgency;
+  conceptCount: number;
+  selectedConceptId: string | null;
+  customerApprovedConceptId: string | null;
+  shareToken: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerReviewPayload {
+  product: string | null;
+  concepts: Array<{
+    id: string;
+    variant: number;
+    imageUrl: string;
+  }>;
+  approvedConceptId: string | null;
+  alreadyApproved: boolean;
 }
 
 export interface UploadedReferenceImage {

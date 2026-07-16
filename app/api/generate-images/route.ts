@@ -11,6 +11,7 @@ import {
   MAX_REFERENCE_IMAGES,
   XAI_MAX_REFERENCE_IMAGES,
 } from "@/lib/referenceImages";
+import { requireTeamAccess } from "@/lib/teamAuth";
 import { generateConceptImagesParallel } from "@/lib/xaiImage";
 import type { GenerateImagesResponse, UploadedReferenceImage } from "@/types";
 
@@ -34,16 +35,22 @@ function validateReferenceImages(
   }
 
   for (const image of images) {
-    if (!image.dataUrl?.startsWith("data:image/")) {
+    const src = image.dataUrl ?? "";
+    const isDataUrl = src.startsWith("data:image/");
+    const isRemoteUrl = src.startsWith("https://") || src.startsWith("http://");
+
+    if (!isDataUrl && !isRemoteUrl) {
       throw new Error(`Invalid image data for "${image.name}".`);
     }
 
-    const approximateBytes = estimateDataUrlBytes(image.dataUrl);
+    if (isDataUrl) {
+      const approximateBytes = estimateDataUrlBytes(src);
 
-    if (approximateBytes > MAX_API_IMAGE_BYTES) {
-      throw new Error(
-        `"${image.name}" is too large after processing. Try a smaller source file.`,
-      );
+      if (approximateBytes > MAX_API_IMAGE_BYTES) {
+        throw new Error(
+          `"${image.name}" is too large after processing. Try a smaller source file.`,
+        );
+      }
     }
   }
 
@@ -51,6 +58,11 @@ function validateReferenceImages(
 }
 
 export async function POST(request: NextRequest) {
+  const denied = requireTeamAccess(request);
+  if (denied) {
+    return denied;
+  }
+
   try {
     const body = (await request.json()) as GenerateImagesBody;
     const emailText = body.emailText?.trim();
