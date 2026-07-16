@@ -17,7 +17,7 @@ export async function GET(_request: Request, context: RouteContext) {
       return NextResponse.json({ error: "Review link not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ review: toCustomerReviewPayload(session) });
+    return NextResponse.json({ review: await toCustomerReviewPayload(session) });
   } catch (error) {
     console.error("Failed to load customer review", error);
     return NextResponse.json({ error: "Failed to load review" }, { status: 500 });

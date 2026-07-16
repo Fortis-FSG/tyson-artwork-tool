@@ -1,4 +1,4 @@
-import { del, list, put } from "@vercel/blob";
+import { del, get, issueSignedToken, list, presignUrl, put } from "@vercel/blob";
 import { randomBytes } from "crypto";
 
 import type {
@@ -8,6 +8,10 @@ import type {
   SavedRequestSummary,
   UploadedReferenceImage,
 } from "@/types";
+
+const BLOB_ACCESS = "private" as const;
+const TEAM_URL_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
+const CUSTOMER_URL_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days (max practical for review)
 
 function sessionPath(id: string): string {
   return `sessions/${id}/session.json`;
@@ -33,6 +37,19 @@ function isHttpUrl(value: string): boolean {
   return value.startsWith("http://") || value.startsWith("https://");
 }
 
+export function toBlobPathname(urlOrPathname: string): string {
+  if (!isHttpUrl(urlOrPathname)) {
+    return urlOrPathname.replace(/^\//, "");
+  }
+
+  try {
+    const url = new URL(urlOrPathname);
+    return decodeURIComponent(url.pathname.replace(/^\//, ""));
+  } catch {
+    return urlOrPathname;
+  }
+}
+
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const response = await fetch(dataUrl);
   return response.blob();
@@ -44,12 +61,83 @@ async function uploadBinary(
   contentType: string,
 ): Promise<string> {
   const result = await put(pathname, body, {
-    access: "public",
+    access: BLOB_ACCESS,
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType,
   });
-  return result.url;
+  // Persist pathname so we can re-sign URLs later for private stores.
+  return result.pathname;
+}
+
+async function readPrivateJson<T>(pathname: string): Promise<T | null> {
+  const result = await get(pathname, {
+    access: BLOB_ACCESS,
+    useCache: false,
+  });
+
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    return null;
+  }
+
+  const text = await new Response(result.stream).text();
+  return JSON.parse(text) as T;
+}
+
+export async function createSignedGetUrl(
+  urlOrPathname: string,
+  ttlMs: number = TEAM_URL_TTL_MS,
+): Promise<string> {
+  if (isDataUrl(urlOrPathname)) {
+    return urlOrPathname;
+  }
+
+  const pathname = toBlobPathname(urlOrPathname);
+  const validUntil = Date.now() + ttlMs;
+  const signedToken = await issueSignedToken({
+    pathname,
+    operations: ["get"],
+    validUntil,
+  });
+  const { presignedUrl } = await presignUrl(signedToken, {
+    pathname,
+    operation: "get",
+    access: BLOB_ACCESS,
+    validUntil,
+  });
+  return presignedUrl;
+}
+
+async function signImageField(value: string, ttlMs: number): Promise<string> {
+  if (!value || isDataUrl(value)) {
+    return value;
+  }
+  return createSignedGetUrl(value, ttlMs);
+}
+
+export async function hydrateSessionForClient(
+  session: SavedRequest,
+  ttlMs: number = TEAM_URL_TTL_MS,
+): Promise<SavedRequest> {
+  const concepts = await Promise.all(
+    session.concepts.map(async (concept) => ({
+      ...concept,
+      imageDataUrl: await signImageField(concept.imageDataUrl, ttlMs),
+    })),
+  );
+
+  const referenceImages = await Promise.all(
+    session.referenceImages.map(async (image) => ({
+      ...image,
+      dataUrl: await signImageField(image.dataUrl, ttlMs),
+    })),
+  );
+
+  return {
+    ...session,
+    concepts,
+    referenceImages,
+  };
 }
 
 async function persistConceptImage(
@@ -57,11 +145,15 @@ async function persistConceptImage(
   concept: GeneratedConcept,
 ): Promise<GeneratedConcept> {
   if (!isDataUrl(concept.imageDataUrl)) {
-    return concept;
+    // Normalize any prior public/private URL down to pathname for storage.
+    return {
+      ...concept,
+      imageDataUrl: toBlobPathname(concept.imageDataUrl),
+    };
   }
 
   const blob = await dataUrlToBlob(concept.imageDataUrl);
-  const imageUrl = await uploadBinary(
+  const pathname = await uploadBinary(
     conceptPath(requestId, concept.variant),
     blob,
     "image/png",
@@ -69,7 +161,7 @@ async function persistConceptImage(
 
   return {
     ...concept,
-    imageDataUrl: imageUrl,
+    imageDataUrl: pathname,
   };
 }
 
@@ -78,11 +170,14 @@ async function persistReferenceImage(
   image: UploadedReferenceImage,
 ): Promise<UploadedReferenceImage> {
   if (!isDataUrl(image.dataUrl)) {
-    return image;
+    return {
+      ...image,
+      dataUrl: toBlobPathname(image.dataUrl),
+    };
   }
 
   const blob = await dataUrlToBlob(image.dataUrl);
-  const dataUrl = await uploadBinary(
+  const pathname = await uploadBinary(
     referencePath(requestId, image.id),
     blob,
     blob.type || "image/jpeg",
@@ -90,7 +185,7 @@ async function persistReferenceImage(
 
   return {
     ...image,
-    dataUrl,
+    dataUrl: pathname,
   };
 }
 
@@ -116,14 +211,20 @@ export function toSummary(session: SavedRequest): SavedRequestSummary {
   };
 }
 
-export function toCustomerReviewPayload(session: SavedRequest): CustomerReviewPayload {
-  return {
-    product: session.product,
-    concepts: session.concepts.map((concept) => ({
+export async function toCustomerReviewPayload(
+  session: SavedRequest,
+): Promise<CustomerReviewPayload> {
+  const concepts = await Promise.all(
+    session.concepts.map(async (concept) => ({
       id: concept.id,
       variant: concept.variant,
-      imageUrl: concept.imageDataUrl,
+      imageUrl: await signImageField(concept.imageDataUrl, CUSTOMER_URL_TTL_MS),
     })),
+  );
+
+  return {
+    product: session.product,
+    concepts,
     approvedConceptId: session.customerApprovedConceptId,
     alreadyApproved: session.status === "customer_approved",
   };
@@ -147,7 +248,7 @@ export async function writeSession(session: SavedRequest): Promise<SavedRequest>
   };
 
   await put(sessionPath(session.id), JSON.stringify(persisted, null, 2), {
-    access: "public",
+    access: BLOB_ACCESS,
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",
@@ -158,7 +259,7 @@ export async function writeSession(session: SavedRequest): Promise<SavedRequest>
       sharePath(persisted.shareToken),
       JSON.stringify({ sessionId: persisted.id }, null, 2),
       {
-        access: "public",
+        access: BLOB_ACCESS,
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: "application/json",
@@ -170,18 +271,7 @@ export async function writeSession(session: SavedRequest): Promise<SavedRequest>
 }
 
 export async function readSession(id: string): Promise<SavedRequest | null> {
-  const { blobs } = await list({ prefix: sessionPath(id), limit: 1 });
-  const match = blobs.find((blob) => blob.pathname === sessionPath(id));
-  if (!match) {
-    return null;
-  }
-
-  const response = await fetch(match.url, { cache: "no-store" });
-  if (!response.ok) {
-    return null;
-  }
-
-  return (await response.json()) as SavedRequest;
+  return readPrivateJson<SavedRequest>(sessionPath(id));
 }
 
 export async function listSessions(): Promise<SavedRequestSummary[]> {
@@ -191,12 +281,8 @@ export async function listSessions(): Promise<SavedRequestSummary[]> {
   const sessions = await Promise.all(
     sessionBlobs.map(async (blob) => {
       try {
-        const response = await fetch(blob.url, { cache: "no-store" });
-        if (!response.ok) {
-          return null;
-        }
-        const session = (await response.json()) as SavedRequest;
-        return toSummary(session);
+        const session = await readPrivateJson<SavedRequest>(blob.pathname);
+        return session ? toSummary(session) : null;
       } catch {
         return null;
       }
@@ -229,19 +315,8 @@ export async function deleteSession(id: string): Promise<void> {
 export async function findSessionByShareToken(
   token: string,
 ): Promise<SavedRequest | null> {
-  const { blobs } = await list({ prefix: sharePath(token), limit: 1 });
-  const match = blobs.find((blob) => blob.pathname === sharePath(token));
-  if (!match) {
-    return null;
-  }
-
-  const response = await fetch(match.url, { cache: "no-store" });
-  if (!response.ok) {
-    return null;
-  }
-
-  const pointer = (await response.json()) as { sessionId?: string };
-  if (!pointer.sessionId) {
+  const pointer = await readPrivateJson<{ sessionId?: string }>(sharePath(token));
+  if (!pointer?.sessionId) {
     return null;
   }
 
@@ -272,14 +347,20 @@ export async function fetchImageBytes(imageUrl: string): Promise<Buffer> {
     return Buffer.from(base64, "base64");
   }
 
-  if (!isHttpUrl(imageUrl)) {
-    throw new Error("Unsupported image URL");
+  const pathnameOrUrl = imageUrl;
+  if (isHttpUrl(pathnameOrUrl) && pathnameOrUrl.includes("vercel-blob-delegation")) {
+    const response = await fetch(pathnameOrUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status}`);
+    }
+    return Buffer.from(await response.arrayBuffer());
   }
 
-  const response = await fetch(imageUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image: ${response.status}`);
+  const pathname = toBlobPathname(pathnameOrUrl);
+  const result = await get(pathname, { access: BLOB_ACCESS });
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    throw new Error("Failed to fetch private blob image");
   }
 
-  return Buffer.from(await response.arrayBuffer());
+  return Buffer.from(await new Response(result.stream).arrayBuffer());
 }

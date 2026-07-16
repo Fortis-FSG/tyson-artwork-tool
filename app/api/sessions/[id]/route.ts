@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { requireTeamAccess } from "@/lib/teamAuth";
-import { deleteSession, readSession } from "@/lib/sessions";
+import { deleteSession, hydrateSessionForClient, readSession } from "@/lib/sessions";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!session) {
       return NextResponse.json({ error: "Request not found" }, { status: 404 });
     }
-    return NextResponse.json({ session });
+    return NextResponse.json({ session: await hydrateSessionForClient(session) });
   } catch (error) {
     console.error("Failed to load session", error);
     return NextResponse.json({ error: "Failed to load request" }, { status: 500 });

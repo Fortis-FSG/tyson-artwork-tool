@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { requireTeamAccess } from "@/lib/teamAuth";
-import { ensureShareToken, readSession } from "@/lib/sessions";
+import {
+  ensureShareToken,
+  hydrateSessionForClient,
+  readSession,
+} from "@/lib/sessions";
 
 export const runtime = "nodejs";
 
@@ -35,7 +39,7 @@ export async function POST(request: Request, context: RouteContext) {
     const reviewUrl = `${origin}/review/${shared.shareToken}`;
 
     return NextResponse.json({
-      session: shared,
+      session: await hydrateSessionForClient(shared),
       reviewUrl,
       shareToken: shared.shareToken,
     });

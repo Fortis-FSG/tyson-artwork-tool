@@ -1,11 +1,27 @@
 import { NextResponse } from "next/server";
 
 import { requireTeamAccess } from "@/lib/teamAuth";
-import { listSessions, readSession, writeSession } from "@/lib/sessions";
+import {
+  hydrateSessionForClient,
+  listSessions,
+  readSession,
+  writeSession,
+} from "@/lib/sessions";
 import { generateRequestId } from "@/lib/utils";
 import type { SavedRequest } from "@/types";
 
 export const runtime = "nodejs";
+
+function blobErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("private store") || message.includes("public access")) {
+    return "Blob store is private — the app must use private access. Redeploy the latest code, or create a public Blob store.";
+  }
+  if (message.toLowerCase().includes("token") || message.includes("Unauthorized")) {
+    return "Blob auth failed. Check BLOB_READ_WRITE_TOKEN / BLOB_STORE_ID on Vercel.";
+  }
+  return fallback;
+}
 
 export async function GET(request: Request) {
   const denied = requireTeamAccess(request);
@@ -19,7 +35,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Failed to list sessions", error);
     return NextResponse.json(
-      { error: "Failed to list saved requests. Is BLOB_READ_WRITE_TOKEN configured?" },
+      { error: blobErrorMessage(error, "Failed to list saved requests.") },
       { status: 500 },
     );
   }
@@ -61,11 +77,12 @@ export async function POST(request: Request) {
     };
 
     const saved = await writeSession(session);
-    return NextResponse.json({ session: saved });
+    const hydrated = await hydrateSessionForClient(saved);
+    return NextResponse.json({ session: hydrated });
   } catch (error) {
     console.error("Failed to save session", error);
     return NextResponse.json(
-      { error: "Failed to save request. Is BLOB_READ_WRITE_TOKEN configured?" },
+      { error: blobErrorMessage(error, "Failed to save request.") },
       { status: 500 },
     );
   }
